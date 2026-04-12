@@ -1,0 +1,5 @@
+pandas
+openpyxl
+sounddevice
+numpy
+scipy

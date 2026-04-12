@@ -126,7 +126,14 @@ class PianoTrainerApp:
 
         self.hand_var = tk.StringVar()
         tk.Label(card, textvariable=self.hand_var,
-                 font=HINT, bg=CARD, fg=BLUE).pack(pady=(0, 20))
+                 font=HINT, bg=CARD, fg=BLUE).pack(pady=(0, 8))
+
+        # How-to-play instruction from the database
+        tk.Label(card, text='How to play:', font=HINT, bg=CARD, fg=MUTED).pack()
+        self.instruction_var = tk.StringVar()
+        tk.Label(card, textvariable=self.instruction_var,
+                 font=LABEL, bg=CARD, fg=ACCENT,
+                 wraplength=560, justify='center').pack(pady=(2, 20))
 
         # ── Listen button ──
         self.listen_btn = tk.Button(
@@ -188,15 +195,17 @@ class PianoTrainerApp:
         ctype     = str(c.get('ChordType', '')).strip()
         hand      = str(c.get('Hand', '')).strip()
         texture   = str(c.get('Texture', '')).strip()
-        notes_raw = str(c.get('ChordNotes', '')).strip()
-        fingering = str(c.get('Fingering', '')).strip()
-        zone      = str(c.get('KeyboardZone', '')).strip()
+        notes_raw   = str(c.get('ChordNotes', '')).strip()
+        fingering   = str(c.get('Fingering', '')).strip()
+        zone        = str(c.get('KeyboardZone', '')).strip()
+        instruction = str(c.get('BrokenOrder', '')).strip()
 
         self.chord_name_var.set(f'{root_note}  {ctype}')
         self.notes_var.set(_format_notes_display(notes_raw))
         self.fingering_var.set(f'Fingering:  {fingering}')
         self.zone_var.set(zone)
         self.hand_var.set(f'{hand}  \u00b7  {texture}')
+        self.instruction_var.set(instruction)
 
         self.result_var.set('')
         self.detected_var.set('')

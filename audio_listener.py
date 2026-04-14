@@ -21,72 +21,46 @@ def freq_to_note(freq):
     return NOTE_NAMES[midi % 12]
 
 
-def _compute_hps(magnitude, n_harmonics=5):
+def detect_notes_from_audio(audio, sample_rate=SAMPLE_RATE, max_notes=4, threshold_ratio=0.38):
     """
-    Harmonic Product Spectrum.
-    Multiplies the spectrum with downsampled versions of itself so that
-    fundamental frequencies are amplified relative to their harmonics.
-    """
-    hps = magnitude.copy().astype(float)
-    for h in range(2, n_harmonics + 1):
-        downsampled = magnitude[::h]
-        length = min(len(hps), len(downsampled))
-        hps[:length] *= downsampled[:length]
-        if length < len(hps):
-            hps[length:] = 0.0
-    return hps
+    Detect piano notes using a chromagram (pitch-class energy) approach.
 
+    Why this is more reliable than HPS for polyphonic piano:
+      - Piano harmonics are integer multiples of the fundamental, so the 2nd
+        harmonic of note X is X an octave higher — same pitch class.
+      - By summing FFT energy across ALL octaves for each of the 12 pitch
+        classes, harmonics reinforce the correct note instead of polluting others.
+      - A simple energy threshold then selects the notes actually played.
 
-def detect_notes_from_audio(audio, sample_rate=SAMPLE_RATE, max_notes=5, min_ratio=0.06):
-    """
-    Detect up to max_notes piano notes from a recorded numpy audio array.
-
-    Strategy:
-      1. FFT the audio with a Hann window.
-      2. Iteratively find the strongest fundamental using HPS.
-      3. Suppress that note's harmonics, then repeat.
-
-    Returns a set of note name strings, e.g. {'C', 'E', 'G'}.
+    Returns a set of note name strings, e.g. {'E', 'G', 'B'}.
     """
     if len(audio) < 2048:
         return set()
 
     window = np.hanning(len(audio))
     fft_mag = np.abs(np.fft.rfft(audio * window))
-    freqs = np.fft.rfftfreq(len(audio), 1.0 / sample_rate)
+    freqs   = np.fft.rfftfreq(len(audio), 1.0 / sample_rate)
 
-    # Restrict to piano range
-    piano_mask = (freqs >= 27.5) & (freqs <= 4200.0)
-    work = fft_mag.copy()
-    work[~piano_mask] = 0.0
+    # Accumulate FFT energy into 12 pitch-class buckets (chroma).
+    # For every piano note (MIDI 21–108), find its nearest FFT bin and add
+    # its magnitude to the corresponding pitch class.
+    chroma = np.zeros(12)
+    for midi in range(21, 109):                        # A0 → C8
+        freq    = A4_FREQ * (2.0 ** ((midi - A4_MIDI) / 12.0))
+        bin_idx = int(np.argmin(np.abs(freqs - freq)))
+        if bin_idx < len(fft_mag):
+            chroma[midi % 12] += fft_mag[bin_idx]
 
-    global_max = work.max()
-    if global_max == 0:
+    peak = chroma.max()
+    if peak == 0:
         return set()
 
-    threshold = global_max * min_ratio
-    detected = set()
+    # Keep only pitch classes whose energy clears the threshold, up to max_notes
+    indices = [i for i in range(12) if chroma[i] >= peak * threshold_ratio]
+    if len(indices) > max_notes:
+        indices = sorted(indices, key=lambda i: -chroma[i])[:max_notes]
 
-    for _ in range(max_notes):
-        if work.max() < threshold:
-            break
-
-        hps = _compute_hps(work, n_harmonics=5)
-        hps[~piano_mask] = 0.0
-
-        peak_idx = int(np.argmax(hps))
-        peak_freq = float(freqs[peak_idx])
-        note = freq_to_note(peak_freq)
-        if note:
-            detected.add(note)
-
-        # Suppress this fundamental and its harmonics so next pass finds a different note
-        for h in range(1, 8):
-            center = peak_freq * h
-            tol = center * 0.04           # ±4 % tolerance around each harmonic
-            work[(freqs >= center - tol) & (freqs <= center + tol)] = 0.0
-
-    return detected
+    return {NOTE_NAMES[i] for i in indices}
 
 
 def listen_for_chord(

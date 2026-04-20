@@ -68,10 +68,9 @@ class PianoTrainerApp:
         self.root.geometry('660x800')
         self.root.resizable(False, False)
 
-        # Load chords — only Solid texture for mic-based training
+        # Load all chords — both Solid and Broken
         all_chords = load_chords(CHORD_FILE)
-        self.chords = [c for c in all_chords
-                       if str(c.get('Texture', '')).strip() == 'Solid']
+        self.chords = all_chords
         random.shuffle(self.chords)
 
         self.index     = 0
@@ -209,7 +208,10 @@ class PianoTrainerApp:
 
         self.result_var.set('')
         self.detected_var.set('')
-        self._set_status('Press Listen, then play the chord on your keyboard.')
+        if texture == 'Broken':
+            self._set_status('Press Listen, then play each note one by one. Hold each note briefly.')
+        else:
+            self._set_status('Press Listen, then press all notes together and hold.')
         self.score_var.set(f'Score:  {self.score} / {self.total}')
 
     def _target_notes(self):

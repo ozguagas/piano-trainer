@@ -21,51 +21,69 @@ def freq_to_note(freq):
     return NOTE_NAMES[midi % 12]
 
 
-def detect_notes_from_audio(audio, sample_rate=SAMPLE_RATE, max_notes=4, threshold_ratio=0.38):
+def detect_notes_from_audio(audio, sample_rate=SAMPLE_RATE, max_notes=4, threshold_ratio=0.28):
     """
-    Detect piano notes using a chromagram (pitch-class energy) approach.
+    Detect piano notes using a short-time averaged chromagram.
 
-    Why this is more reliable than HPS for polyphonic piano:
-      - Piano harmonics are integer multiples of the fundamental, so the 2nd
-        harmonic of note X is X an octave higher — same pitch class.
-      - By summing FFT energy across ALL octaves for each of the 12 pitch
-        classes, harmonics reinforce the correct note instead of polluting others.
-      - A simple energy threshold then selects the notes actually played.
+    The audio is split into overlapping windows. A chromagram (12-bin
+    pitch-class energy) is computed for each window and then averaged.
+
+    Benefits over a single FFT:
+      - Simultaneous notes: each window captures all notes → consistent energy.
+      - Sequential/broken notes: different windows capture different notes;
+        averaging ensures all of them accumulate enough energy to pass the
+        threshold even though no single window contains the full chord.
+      - Random noise peaks average out across windows.
 
     Returns a set of note name strings, e.g. {'E', 'G', 'B'}.
     """
     if len(audio) < 2048:
         return set()
 
-    window = np.hanning(len(audio))
-    fft_mag = np.abs(np.fft.rfft(audio * window))
-    freqs   = np.fft.rfftfreq(len(audio), 1.0 / sample_rate)
+    WIN  = 8192   # ~186 ms window — long enough to capture one clear note
+    HOP  = 2048   # 75 % overlap
 
-    # Accumulate FFT energy into 12 pitch-class buckets (chroma).
-    # For every piano note (MIDI 21–108), find its nearest FFT bin and add
-    # its magnitude to the corresponding pitch class.
-    chroma = np.zeros(12)
-    for midi in range(21, 109):                        # A0 → C8
-        freq    = A4_FREQ * (2.0 ** ((midi - A4_MIDI) / 12.0))
-        bin_idx = int(np.argmin(np.abs(freqs - freq)))
-        if bin_idx < len(fft_mag):
-            chroma[midi % 12] += fft_mag[bin_idx]
+    chroma_sum = np.zeros(12)
+    n_windows  = 0
 
-    peak = chroma.max()
-    if peak == 0:
+    # Pre-compute freq→bin mapping once (all windows share the same size)
+    dummy_freqs = np.fft.rfftfreq(WIN, 1.0 / sample_rate)
+    midi_bins   = {}
+    for midi in range(21, 109):          # A0 → C8
+        freq = A4_FREQ * (2.0 ** ((midi - A4_MIDI) / 12.0))
+        midi_bins[midi] = int(np.argmin(np.abs(dummy_freqs - freq)))
+
+    for start in range(0, max(1, len(audio) - WIN + 1), HOP):
+        chunk = audio[start : start + WIN]
+        if len(chunk) < WIN:
+            chunk = np.pad(chunk, (0, WIN - len(chunk)))
+        window  = np.hanning(WIN)
+        fft_mag = np.abs(np.fft.rfft(chunk * window))
+
+        chroma = np.zeros(12)
+        for midi, b in midi_bins.items():
+            if b < len(fft_mag):
+                chroma[midi % 12] += fft_mag[b]
+
+        chroma_sum += chroma
+        n_windows  += 1
+
+    if n_windows == 0 or chroma_sum.max() == 0:
         return set()
 
-    # Keep only pitch classes whose energy clears the threshold, up to max_notes
-    indices = [i for i in range(12) if chroma[i] >= peak * threshold_ratio]
+    chroma_avg = chroma_sum / n_windows
+    peak       = chroma_avg.max()
+
+    indices = [i for i in range(12) if chroma_avg[i] >= peak * threshold_ratio]
     if len(indices) > max_notes:
-        indices = sorted(indices, key=lambda i: -chroma[i])[:max_notes]
+        indices = sorted(indices, key=lambda i: -chroma_avg[i])[:max_notes]
 
     return {NOTE_NAMES[i] for i in indices}
 
 
 def listen_for_chord(
     onset_threshold=0.018,
-    silence_duration=0.45,
+    silence_duration=0.8,
     max_record_seconds=4.0,
     timeout_seconds=15.0,
     sample_rate=SAMPLE_RATE,

@@ -9,7 +9,7 @@ import tkinter as tk
 from tkinter import font as tkfont
 
 from chord_loader import load_chords
-from audio_listener import listen_for_chord, detect_notes_from_audio, SAMPLE_RATE
+from audio_listener import listen_for_chord, verify_chord, SAMPLE_RATE
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -29,6 +29,11 @@ BLUE      = '#64b5f6'
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+_NOTE_TO_PC = {
+    'C': 0, 'C#': 1, 'D': 2, 'D#': 3, 'E': 4,  'F': 5,
+    'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11,
+}
+
 _FLAT_TO_SHARP = {
     'Eb': 'D#', 'Bb': 'A#', 'Gb': 'F#',
     'Ab': 'G#', 'Db': 'C#', 'E#': 'F',
@@ -163,7 +168,11 @@ class PianoTrainerApp:
 
         self.detected_var = tk.StringVar(value='')
         tk.Label(rcard, textvariable=self.detected_var,
-                 font=LABEL, bg=CARD2, fg=MUTED).pack(pady=(0, 16))
+                 font=LABEL, bg=CARD2, fg=MUTED).pack(pady=(0, 4))
+
+        self.confidence_var = tk.StringVar(value='')
+        tk.Label(rcard, textvariable=self.confidence_var,
+                 font=HINT, bg=CARD2, fg=MUTED).pack(pady=(0, 14))
 
         # ── Navigation ──
         nav = tk.Frame(self.root, bg=BG)
@@ -208,6 +217,7 @@ class PianoTrainerApp:
 
         self.result_var.set('')
         self.detected_var.set('')
+        self.confidence_var.set('')
         if texture == 'Broken':
             self._set_status('Press Listen, then play each note one by one. Hold each note briefly.')
         else:
@@ -217,34 +227,40 @@ class PianoTrainerApp:
     def _target_notes(self):
         return _parse_chord_notes(self.chords[self.index].get('ChordNotes', ''))
 
+    def _target_pitch_classes(self):
+        notes = _parse_chord_notes(self.chords[self.index].get('ChordNotes', ''))
+        return [_NOTE_TO_PC[n] for n in notes if n in _NOTE_TO_PC]
+
     # ── Audio Flow ────────────────────────────────────────────────────────────
     def _start_listening(self):
         if self._busy:
             return
         self._busy = True
+        # Capture pitch classes on the main thread before spawning audio thread
+        self._current_pcs = self._target_pitch_classes()
         self.listen_btn.config(state='disabled', text='Listening...')
         self.result_var.set('')
         self.detected_var.set('')
+        self.confidence_var.set('')
         threading.Thread(target=self._listen_thread, daemon=True).start()
 
     def _listen_thread(self):
         audio = listen_for_chord(
             onset_threshold=0.018,
-            silence_duration=0.45,
+            silence_duration=0.8,
             max_record_seconds=4.0,
             timeout_seconds=12.0,
             sample_rate=SAMPLE_RATE,
             status_callback=lambda m: self.root.after(0, self._set_status, m),
         )
-        detected = detect_notes_from_audio(audio, sample_rate=SAMPLE_RATE, max_notes=5)
-        self.root.after(0, self._show_result, detected)
+        result = verify_chord(audio, self._current_pcs, sample_rate=SAMPLE_RATE)
+        self.root.after(0, self._show_result, result)
 
-    def _show_result(self, detected: set):
+    def _show_result(self, result):
         self._busy = False
         self.listen_btn.config(state='normal', text='\u25b6  Listen')
 
-        target    = self._target_notes()
-        detected  = {_normalize(n) for n in detected}
+        is_match, confidence, detected, missing, extra = result
 
         if detected:
             self.detected_var.set('Detected:  ' + '  \u00b7  '.join(sorted(detected)))
@@ -252,17 +268,17 @@ class PianoTrainerApp:
             self.detected_var.set(
                 'No notes detected \u2014 try playing louder or closer to the mic.')
 
+        self.confidence_var.set(f'Confidence:  {int(confidence * 100)} %')
+
         self.total += 1
-        if detected == target:
+        if is_match:
             self.score += 1
             self.result_var.set('\u2713  Correct!  Well done!')
             self.result_lbl.config(fg=GREEN)
         else:
-            missed = target - detected
-            extra  = detected - target
-            parts  = []
-            if missed:
-                parts.append('Missing: ' + ', '.join(sorted(missed)))
+            parts = []
+            if missing:
+                parts.append('Missing: ' + ', '.join(sorted(missing)))
             if extra:
                 parts.append('Extra: ' + ', '.join(sorted(extra)))
             detail = '  |  '.join(parts)

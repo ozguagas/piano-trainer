@@ -147,23 +147,45 @@ def listen_for_chord(
     """
     Blocks until a chord is played and released via the microphone.
 
-    1. Waits for audio above onset_threshold (chord pressed).
-    2. Records until silence_duration seconds of quiet follows (chord released).
-    3. Returns the recorded numpy array for analysis.
+    Flow
+    ----
+    1. Measure ambient noise for ~0.5 s → set adaptive threshold = 4× noise RMS
+       (never below onset_threshold).  This prevents fan/room noise from
+       triggering a false recording before the user plays.
+    2. Wait for audio that clearly exceeds the adaptive threshold.
+    3. Record until silence_duration seconds of quiet follows.
+    4. Reject recordings shorter than 0.4 s (noise bursts, not chords).
 
-    status_callback(str) is called with status messages if provided.
-    Returns an empty array on timeout.
+    Returns an empty array if nothing valid was captured.
     """
     CHUNK          = 2048
+    MIN_RECORD_S   = 0.4    # recordings shorter than this are discarded as noise
+
+    def _status(msg):
+        if status_callback:
+            status_callback(msg)
+
+    # ── 1. Measure ambient noise floor ───────────────────────────────────────
+    _status("Calibrating mic...")
+    noise_rms_buf = []
+    with sd.InputStream(samplerate=sample_rate, channels=1,
+                        blocksize=CHUNK, dtype='float32') as stream:
+        n_noise_chunks = max(1, int(0.5 * sample_rate / CHUNK))
+        for _ in range(n_noise_chunks):
+            data, _ = stream.read(CHUNK)
+            noise_rms_buf.append(float(np.sqrt(np.mean(data.flatten() ** 2))))
+
+    noise_rms  = float(np.mean(noise_rms_buf)) if noise_rms_buf else 0.0
+    threshold  = max(onset_threshold, noise_rms * 4.0)
+    silence_th = threshold * 0.4   # silence = below 40 % of onset threshold
+
+    # ── 2. Wait for onset and record ─────────────────────────────────────────
     recorded       = []
     recording      = False
     silent_chunks  = 0
     silence_needed = int(silence_duration * sample_rate / CHUNK)
     max_chunks     = int(max_record_seconds * sample_rate / CHUNK)
-
-    def _status(msg):
-        if status_callback:
-            status_callback(msg)
+    min_chunks     = int(MIN_RECORD_S * sample_rate / CHUNK)
 
     _status("Waiting for you to play...")
     t0 = time.time()
@@ -180,14 +202,14 @@ def listen_for_chord(
             rms      = float(np.sqrt(np.mean(data ** 2)))
 
             if not recording:
-                if rms > onset_threshold:
+                if rms > threshold:
                     recording     = True
                     recorded      = [data]
                     silent_chunks = 0
                     _status("Detected! Keep holding...")
             else:
                 recorded.append(data)
-                if rms < onset_threshold * 0.5:
+                if rms < silence_th:
                     silent_chunks += 1
                     if silent_chunks >= silence_needed:
                         _status("Processing...")
@@ -199,4 +221,9 @@ def listen_for_chord(
                     _status("Processing...")
                     break
 
-    return np.concatenate(recorded) if recorded else np.array([], dtype='float32')
+    # ── 3. Reject short / noisy captures ─────────────────────────────────────
+    if len(recorded) < min_chunks:
+        _status("Too short — please try again.")
+        return np.array([], dtype='float32')
+
+    return np.concatenate(recorded)

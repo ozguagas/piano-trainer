@@ -253,6 +253,10 @@ class PianoTrainerApp:
             sample_rate=SAMPLE_RATE,
             status_callback=lambda m: self.root.after(0, self._set_status, m),
         )
+        if len(audio) == 0:
+            # Nothing valid captured (noise burst / timeout) — reset without counting
+            self.root.after(0, self._reset_after_no_audio)
+            return
         result = verify_chord(audio, self._current_pcs, sample_rate=SAMPLE_RATE)
         self.root.after(0, self._show_result, result)
 
@@ -286,6 +290,11 @@ class PianoTrainerApp:
             self.result_lbl.config(fg=RED)
 
         self.score_var.set(f'Score:  {self.score} / {self.total}')
+
+    def _reset_after_no_audio(self):
+        self._busy = False
+        self.listen_btn.config(state='normal', text='▶  Listen')
+        # Status was already set by listen_for_chord (e.g. "Too short — please try again.")
 
     # ── Navigation ────────────────────────────────────────────────────────────
     def _next_chord(self):

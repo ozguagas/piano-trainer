@@ -74,8 +74,7 @@ class PianoTrainerApp:
         self.root = root
         self.root.title('Piano Chord Trainer')
         self.root.configure(bg=BG)
-        self.root.geometry('660x800')
-        self.root.resizable(False, False)
+        self.root.resizable(False, True)   # fixed width, user can resize height
 
         # Load all chords — both Solid and Broken
         all_chords = load_chords(CHORD_FILE)
@@ -89,6 +88,11 @@ class PianoTrainerApp:
 
         self._build_ui()
         self._show_chord()
+
+        # Let Tkinter measure the content, then lock the window to that size
+        self.root.update_idletasks()
+        self.root.minsize(660, self.root.winfo_reqheight())
+        self.root.geometry(f'660x{self.root.winfo_reqheight()}')
 
     # ── UI Construction ───────────────────────────────────────────────────────
     def _build_ui(self):
@@ -105,7 +109,7 @@ class PianoTrainerApp:
 
         # Title
         tk.Label(self.root, text='Piano Chord Trainer',
-                 font=TITLE, bg=BG, fg=ACCENT).pack(pady=(20, 2))
+                 font=TITLE, bg=BG, fg=ACCENT).pack(pady=(14, 2))
 
         # Score
         self.score_var = tk.StringVar(value='Score:  0 / 0')
@@ -118,7 +122,7 @@ class PianoTrainerApp:
 
         self.chord_name_var = tk.StringVar()
         tk.Label(card, textvariable=self.chord_name_var,
-                 font=CHORD, bg=CARD, fg=TEXT).pack(pady=(20, 4))
+                 font=CHORD, bg=CARD, fg=TEXT).pack(pady=(14, 2))
 
         self.notes_var = tk.StringVar()
         tk.Label(card, textvariable=self.notes_var,
@@ -141,13 +145,13 @@ class PianoTrainerApp:
         self.instruction_var = tk.StringVar()
         tk.Label(card, textvariable=self.instruction_var,
                  font=LABEL, bg=CARD, fg=ACCENT,
-                 wraplength=560, justify='center').pack(pady=(2, 12))
+                 wraplength=560, justify='center').pack(pady=(2, 8))
 
         tk.Button(card, text='\U0001f3b9  Show Keys',
                   font=SMALL, bg=CARD2, fg=TEXT,
                   activebackground='#0a2a50', relief='flat',
                   padx=18, pady=6, cursor='hand2',
-                  command=self._show_keys_popup).pack(pady=(0, 18))
+                  command=self._show_keys_popup).pack(pady=(0, 12))
 
         # ── Listen button ──
         self.listen_btn = tk.Button(
@@ -395,17 +399,18 @@ class PianoTrainerApp:
         # Write log entry for debugging
         c = self.chords[self.index]
         entry = {
-            'time':       datetime.now().isoformat(timespec='seconds'),
-            'chord':      f"{c.get('Root')} {c.get('ChordType')}",
-            'texture':    c.get('Texture'),
-            'hand':       c.get('Hand'),
-            'expected':   sorted(self._target_notes()),
-            'detected':   sorted(detected),
-            'missing':    sorted(missing),
-            'extra':      sorted(extra),
-            'is_match':   is_match,
-            'confidence': confidence,
-            'chroma':     chroma_debug,
+            'time':         datetime.now().isoformat(timespec='seconds'),
+            'chord':        f"{c.get('Root')} {c.get('ChordType')}",
+            'texture':      c.get('Texture'),
+            'hand':         c.get('Hand'),
+            'expected':     sorted(self._target_notes()),
+            'expected_pcs': sorted(self._current_pcs),
+            'detected':     sorted(detected),
+            'missing':      sorted(missing),
+            'extra':        sorted(extra),
+            'is_match':     is_match,
+            'confidence':   confidence,
+            'chroma':       chroma_debug,
         }
         try:
             with open(LOG_FILE, 'a', encoding='utf-8') as f:

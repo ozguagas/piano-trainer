@@ -54,7 +54,7 @@ def _compute_chroma(audio, sample_rate=SAMPLE_RATE):
 
 # ── Public API ────────────────────────────────────────────────────────────────
 
-def verify_chord(audio, expected_pitch_classes, sample_rate=SAMPLE_RATE):
+def verify_chord(audio, expected_pitch_classes, sample_rate=SAMPLE_RATE, texture='solid'):
     """
     Score-informed chord verification.
 
@@ -83,6 +83,17 @@ def verify_chord(audio, expected_pitch_classes, sample_rate=SAMPLE_RATE):
     skip = int(0.20 * sample_rate)
     if len(audio) > skip + _WIN:
         audio = audio[skip:]
+
+    # For solid chords all notes must be pressed simultaneously, so we only
+    # analyse the first 800 ms after the attack.  If the user played broken
+    # (notes one-by-one), the later notes won't be present in this window
+    # and the chord will be marked incomplete — enforcing the correct style.
+    # For broken chords we keep the full recording so every sequential note
+    # accumulates energy across its own windows.
+    if texture == 'solid':
+        solid_samples = int(0.80 * sample_rate)
+        if len(audio) > solid_samples:
+            audio = audio[:solid_samples]
 
     empty_chroma = {NOTE_NAMES[i]: 0.0 for i in range(12)}
     if len(audio) < 2048:

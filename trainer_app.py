@@ -353,7 +353,8 @@ class PianoTrainerApp:
             return
         self._busy = True
         # Capture pitch classes on the main thread before spawning audio thread
-        self._current_pcs = self._target_pitch_classes()
+        self._current_pcs     = self._target_pitch_classes()
+        self._current_texture = str(self.chords[self.index].get('Texture', 'Solid')).strip().lower()
         self.listen_btn.config(state='disabled', text='Listening...')
         self.result_var.set('')
         self.detected_var.set('')
@@ -373,7 +374,8 @@ class PianoTrainerApp:
             # Nothing valid captured (noise burst / timeout) — reset without counting
             self.root.after(0, self._reset_after_no_audio)
             return
-        result = verify_chord(audio, self._current_pcs, sample_rate=SAMPLE_RATE)
+        result = verify_chord(audio, self._current_pcs, sample_rate=SAMPLE_RATE,
+                              texture=self._current_texture)
         self.root.after(0, self._show_result, result)
 
     def _show_result(self, result):
@@ -416,6 +418,7 @@ class PianoTrainerApp:
             'hand':         c.get('Hand'),
             'expected':     sorted(self._target_notes()),
             'expected_pcs': sorted(self._current_pcs),
+            'texture_enforced': self._current_texture,
             'detected':     sorted(detected),
             'missing':      sorted(missing),
             'extra':        sorted(extra),

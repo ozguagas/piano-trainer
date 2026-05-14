@@ -71,41 +71,54 @@ def verify_chord(audio, expected_pitch_classes, sample_rate=SAMPLE_RATE):
 
     Returns
     -------
-    (is_match, confidence, detected_names, missing_names, extra_names)
-      is_match   : True when zero missing and zero extra notes
-      confidence : float 0–1 (how well the chord was played)
-      detected_names : note names the app heard
-      missing_names  : expected notes that were too quiet
-      extra_names    : unexpected notes above the strict threshold
+    (is_match, confidence, detected_names, missing_names, extra_names, chroma_debug)
+      is_match      : True when zero missing and zero extra notes
+      confidence    : float 0–1 (how well the chord was played)
+      detected_names: note names the app heard
+      missing_names : expected notes that were too quiet
+      extra_names   : unexpected notes above the strict threshold
+      chroma_debug  : dict {note_name: normalised_energy} for all 12 pitch classes
     """
     # Drop attack transient
     skip = int(0.20 * sample_rate)
     if len(audio) > skip + _WIN:
         audio = audio[skip:]
 
+    empty_chroma = {NOTE_NAMES[i]: 0.0 for i in range(12)}
     if len(audio) < 2048:
         missing = {NOTE_NAMES[pc] for pc in expected_pitch_classes}
-        return False, 0.0, set(), missing, set()
+        return False, 0.0, set(), missing, set(), empty_chroma
 
     chroma = _compute_chroma(audio, sample_rate)
     peak   = chroma.max()
     if peak == 0:
         missing = {NOTE_NAMES[pc] for pc in expected_pitch_classes}
-        return False, 0.0, set(), missing, set()
+        return False, 0.0, set(), missing, set(), empty_chroma
 
-    chroma_n      = chroma / peak
-    expected_set  = set(expected_pitch_classes)
+    chroma_n       = chroma / peak
+    chroma_debug   = {NOTE_NAMES[i]: round(float(chroma_n[i]), 3) for i in range(12)}
+
+    expected_set   = set(expected_pitch_classes)
     unexpected_set = set(range(12)) - expected_set
 
+    # Harmonic ghost exemption:
+    # The 3rd harmonic of any note lands a perfect fifth (+7 semitones) above it.
+    # These show up in the chromagram but are physics, not wrong notes.
+    # Example: F# (pc=6) → 3rd harmonic → C# (pc=1).  Don't penalise C# in D major.
+    harmonic_ghosts = {(pc + 7) % 12 for pc in expected_set}
+
     missing_pcs = {pc for pc in expected_set   if chroma_n[pc] < 0.30}
-    extra_pcs   = {pc for pc in unexpected_set if chroma_n[pc] >= 0.50}
+    extra_pcs   = {
+        pc for pc in unexpected_set
+        if chroma_n[pc] >= 0.50 and pc not in harmonic_ghosts
+    }
 
     completeness = 1.0 - len(missing_pcs) / max(1, len(expected_set))
     penalty      = 0.5 * min(len(extra_pcs) / max(1, len(expected_set)), 1.0)
     confidence   = round(max(0.0, completeness * (1.0 - penalty)), 2)
 
-    is_match       = (len(missing_pcs) == 0) and (len(extra_pcs) == 0)
-    detected_pcs   = (expected_set - missing_pcs) | extra_pcs
+    is_match     = (len(missing_pcs) == 0) and (len(extra_pcs) == 0)
+    detected_pcs = (expected_set - missing_pcs) | extra_pcs
 
     return (
         is_match,
@@ -113,6 +126,7 @@ def verify_chord(audio, expected_pitch_classes, sample_rate=SAMPLE_RATE):
         {NOTE_NAMES[pc] for pc in detected_pcs},
         {NOTE_NAMES[pc] for pc in missing_pcs},
         {NOTE_NAMES[pc] for pc in extra_pcs},
+        chroma_debug,
     )
 
 

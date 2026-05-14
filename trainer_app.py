@@ -2,14 +2,18 @@
 # Piano Chord Trainer — microphone-based chord recognition GUI
 # Run with:  python trainer_app.py
 
+import json
 import os
 import random
 import threading
 import tkinter as tk
+from datetime import datetime
 from tkinter import font as tkfont
 
 from chord_loader import load_chords
 from audio_listener import listen_for_chord, verify_chord, SAMPLE_RATE
+
+LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'detection_log.jsonl')
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 BASE_DIR   = os.path.dirname(os.path.abspath(__file__))
@@ -264,7 +268,7 @@ class PianoTrainerApp:
         self._busy = False
         self.listen_btn.config(state='normal', text='\u25b6  Listen')
 
-        is_match, confidence, detected, missing, extra = result
+        is_match, confidence, detected, missing, extra, chroma_debug = result
 
         if detected:
             self.detected_var.set('Detected:  ' + '  \u00b7  '.join(sorted(detected)))
@@ -290,6 +294,27 @@ class PianoTrainerApp:
             self.result_lbl.config(fg=RED)
 
         self.score_var.set(f'Score:  {self.score} / {self.total}')
+
+        # Write log entry for debugging
+        c = self.chords[self.index]
+        entry = {
+            'time':       datetime.now().isoformat(timespec='seconds'),
+            'chord':      f"{c.get('Root')} {c.get('ChordType')}",
+            'texture':    c.get('Texture'),
+            'hand':       c.get('Hand'),
+            'expected':   sorted(self._target_notes()),
+            'detected':   sorted(detected),
+            'missing':    sorted(missing),
+            'extra':      sorted(extra),
+            'is_match':   is_match,
+            'confidence': confidence,
+            'chroma':     chroma_debug,
+        }
+        try:
+            with open(LOG_FILE, 'a', encoding='utf-8') as f:
+                f.write(json.dumps(entry) + '\n')
+        except OSError:
+            pass
 
     def _reset_after_no_audio(self):
         self._busy = False

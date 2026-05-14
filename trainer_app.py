@@ -38,15 +38,26 @@ _NOTE_TO_PC = {
     'F#': 6, 'G': 7, 'G#': 8, 'A': 9, 'A#': 10, 'B': 11,
 }
 
-_FLAT_TO_SHARP = {
-    'Eb': 'D#', 'Bb': 'A#', 'Gb': 'F#',
-    'Ab': 'G#', 'Db': 'C#', 'E#': 'F',
-    'B#': 'C',  'Fb': 'E',  'Cb': 'B',
-}
+# Base pitch class for each letter name
+_LETTER_PC = {'C': 0, 'D': 2, 'E': 4, 'F': 5, 'G': 7, 'A': 9, 'B': 11}
 
 
 def _normalize(note):
-    return _FLAT_TO_SHARP.get(note.strip(), note.strip())
+    """
+    Convert any note string to its canonical sharp name.
+    Handles single/double sharps (F##→G), single/double flats (Abb→G),
+    and edge cases like B#→C, Cb→B, Fb→E, E#→F.
+    """
+    note = note.strip()
+    if not note or note[0].upper() not in _LETTER_PC:
+        return note
+    pc = _LETTER_PC[note[0].upper()]
+    for ch in note[1:]:
+        if ch == '#':
+            pc += 1
+        elif ch == 'b':
+            pc -= 1
+    return NOTE_NAMES[pc % 12]
 
 
 def _parse_chord_notes(raw):

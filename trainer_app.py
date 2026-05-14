@@ -11,7 +11,7 @@ from datetime import datetime
 from tkinter import font as tkfont
 
 from chord_loader import load_chords
-from audio_listener import listen_for_chord, verify_chord, SAMPLE_RATE
+from audio_listener import listen_for_chord, verify_chord, SAMPLE_RATE, NOTE_NAMES
 
 LOG_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'detection_log.jsonl')
 
@@ -141,7 +141,13 @@ class PianoTrainerApp:
         self.instruction_var = tk.StringVar()
         tk.Label(card, textvariable=self.instruction_var,
                  font=LABEL, bg=CARD, fg=ACCENT,
-                 wraplength=560, justify='center').pack(pady=(2, 20))
+                 wraplength=560, justify='center').pack(pady=(2, 12))
+
+        tk.Button(card, text='\U0001f3b9  Show Keys',
+                  font=SMALL, bg=CARD2, fg=TEXT,
+                  activebackground='#0a2a50', relief='flat',
+                  padx=18, pady=6, cursor='hand2',
+                  command=self._show_keys_popup).pack(pady=(0, 18))
 
         # ── Listen button ──
         self.listen_btn = tk.Button(
@@ -195,6 +201,97 @@ class PianoTrainerApp:
                'then release. Keep your keyboard close to the microphone.')
         tk.Label(self.root, text=tip, font=HINT, bg=BG, fg=MUTED,
                  wraplength=600, justify='center').pack(pady=(8, 4))
+
+    # ── Piano Keyboard Popup ──────────────────────────────────────────────────
+    def _show_keys_popup(self):
+        """Open a popup showing a 2-octave piano with the target chord highlighted."""
+        target_pcs = set(self._target_pitch_classes())
+        c          = self.chords[self.index]
+        chord_lbl  = f"{c.get('Root')} {c.get('ChordType')}"
+        subtitle   = f"{c.get('Hand')}  ·  {c.get('Texture')}"
+        fingering  = str(c.get('Fingering', '')).strip()
+
+        popup = tk.Toplevel(self.root)
+        popup.title('Keys to Press')
+        popup.configure(bg=BG)
+        popup.resizable(False, False)
+        popup.transient(self.root)
+
+        BIG  = tkfont.Font(family='Segoe UI', size=18, weight='bold')
+        SML  = tkfont.Font(family='Segoe UI', size=10, slant='italic')
+        BTN2 = tkfont.Font(family='Segoe UI', size=12, weight='bold')
+        KEY  = tkfont.Font(family='Segoe UI', size=8,  weight='bold')
+
+        tk.Label(popup, text=chord_lbl, font=BIG, bg=BG, fg=TEXT).pack(pady=(18, 2))
+        tk.Label(popup, text=subtitle,  font=SML, bg=BG, fg=MUTED).pack()
+
+        # ── Canvas ────────────────────────────────────────────────────────────
+        WW, WH = 38, 124   # white key size
+        BW, BH = 24, 78    # black key size
+        N_OCT  = 2
+        PAD    = 10
+
+        cw = N_OCT * 7 * WW + PAD * 2
+        ch = WH + PAD + 4
+
+        cv = tk.Canvas(popup, width=cw, height=ch, bg=BG, highlightthickness=0)
+        cv.pack(padx=24, pady=14)
+
+        # Pitch classes for each white and black key slot within an octave
+        WHITE_PCS   = [0, 2, 4, 5, 7, 9, 11]   # C D E F G A B
+        BLACK_PCS   = [1, 3, 6, 8, 10]          # C# D# F# G# A#
+        # Index of the white key immediately LEFT of each black key
+        BLACK_LEFT  = [0, 1, 3, 4, 5]
+
+        # ── White keys ────────────────────────────────────────────────────────
+        for oct in range(N_OCT):
+            for wi, pc in enumerate(WHITE_PCS):
+                x   = PAD + (oct * 7 + wi) * WW
+                y   = PAD
+                hit = pc in target_pcs
+                cv.create_rectangle(
+                    x, y, x + WW - 2, y + WH,
+                    fill=ACCENT if hit else '#f2f2f2',
+                    outline='#666', width=1,
+                )
+                if hit:
+                    # White dot with note name inside
+                    cx2, cy2 = x + WW // 2, y + WH - 18
+                    cv.create_oval(cx2 - 11, cy2 - 11, cx2 + 11, cy2 + 11,
+                                   fill='white', outline='')
+                    cv.create_text(cx2, cy2, text=NOTE_NAMES[pc],
+                                   font=KEY, fill=ACCENT)
+
+        # ── Black keys (drawn on top) ─────────────────────────────────────────
+        for oct in range(N_OCT):
+            for bpc, left_wi in zip(BLACK_PCS, BLACK_LEFT):
+                x   = PAD + (oct * 7 + left_wi) * WW + WW - BW // 2 - 1
+                y   = PAD
+                hit = bpc in target_pcs
+                cv.create_rectangle(
+                    x, y, x + BW, y + BH,
+                    fill='#c0102a' if hit else '#111',
+                    outline='#000', width=1,
+                )
+                if hit:
+                    cx2, cy2 = x + BW // 2, y + BH - 14
+                    cv.create_oval(cx2 - 9, cy2 - 9, cx2 + 9, cy2 + 9,
+                                   fill='white', outline='')
+                    cv.create_text(cx2, cy2, text=NOTE_NAMES[bpc],
+                                   font=KEY, fill='#c0102a')
+
+        # ── Footer ────────────────────────────────────────────────────────────
+        if fingering:
+            tk.Label(popup, text=f'Fingering:  {fingering}',
+                     font=SML, bg=BG, fg=MUTED).pack(pady=(0, 4))
+
+        tk.Label(popup, text='Red / highlighted = notes to press',
+                 font=SML, bg=BG, fg=MUTED).pack(pady=(0, 10))
+
+        tk.Button(popup, text='Close', font=BTN2,
+                  bg='#424242', fg='white', activebackground='#212121',
+                  relief='flat', padx=28, pady=8, cursor='hand2',
+                  command=popup.destroy).pack(pady=(0, 18))
 
     # ── Chord Display ─────────────────────────────────────────────────────────
     def _show_chord(self):
